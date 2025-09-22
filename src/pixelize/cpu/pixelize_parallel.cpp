@@ -1,10 +1,14 @@
 #include <iostream>
 #include <filesystem>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
 #include "../../utils/image_utils.h"
 
-void processPixelBlock(int startX, int startY, int blockSize, int width, int height, const std::vector<Pixel>& input, std::vector<Pixel>& result) {
+void processPixelBlock(int startX, int startY, int blockSize, int width, int height, 
+                      const std::vector<Pixel>& input, std::vector<Pixel>& result) {
     int endX = std::min(startX + blockSize, width);
     int endY = std::min(startY + blockSize, height);
     int actualBlockSize = (endX - startX) * (endY - startY);
@@ -36,14 +40,43 @@ void processPixelBlock(int startX, int startY, int blockSize, int width, int hei
     }
 }
 
-std::vector<Pixel> pixelizeImage(const std::vector<Pixel>& input, int width, int height, int blockSize) {
+void processPixelBlocksRange(int startY, int endY, int blockSize, int width, int height,
+                           const std::vector<Pixel>& input, std::vector<Pixel>& result) {
+    for (int y = startY; y < endY; y += blockSize) {
+        for (int x = 0; x < width; x += blockSize) {
+            processPixelBlock(x, y, blockSize, width, height, input, result);
+        }
+    }
+}
+
+std::vector<Pixel> pixelizeImageParallel(const std::vector<Pixel>& input, int width, int height, int blockSize, int numThreads) {
     if (blockSize <= 1) return input;
     
     std::vector<Pixel> result(input.size());
+    std::vector<std::thread> threads;
     
-    for (int y = 0; y < height; y += blockSize) {
-        for (int x = 0; x < width; x += blockSize) {
-            processPixelBlock(x, y, blockSize, width, height, input, result);
+    if (numThreads == 0) {
+        numThreads = std::thread::hardware_concurrency();
+        if (numThreads == 0) numThreads = 4;
+    }
+    
+    int rowsPerThread = (height + numThreads - 1) / numThreads;
+    
+    rowsPerThread = ((rowsPerThread + blockSize - 1) / blockSize) * blockSize;
+    
+    for (int i = 0; i < numThreads; ++i) {
+        int startY = i * rowsPerThread;
+        int endY = std::min((i + 1) * rowsPerThread, height);
+        
+        if (startY >= height) break;
+        
+        threads.emplace_back(processPixelBlocksRange, startY, endY, blockSize, 
+                           width, height, std::cref(input), std::ref(result));
+    }
+    
+    for (auto& thread : threads) {
+        if (thread.joinable()) {
+            thread.join();
         }
     }
     
@@ -52,7 +85,7 @@ std::vector<Pixel> pixelizeImage(const std::vector<Pixel>& input, int width, int
 
 int main() {
     std::string inputPath, outputPath;
-    int blockSize;
+    int blockSize, numThreads;
 
     std::cout << "Enter input image path: ";
     std::getline(std::cin, inputPath);
@@ -79,6 +112,14 @@ int main() {
         return 1;
     }
 
+    std::cout << "Enter number of threads (0 for auto-detect): ";
+    std::cin >> numThreads;
+
+    if (numThreads < 0) {
+        std::cerr << "Number of threads must be non-negative" << std::endl;
+        return 1;
+    }
+
     std::cout << "Loading image: " << inputPath << std::endl;
     
     int width, height;
@@ -90,14 +131,16 @@ int main() {
     }
     
     std::cout << "Image loaded: " << width << "x" << height << std::endl;
-    std::cout << "Pixelizing image with block size " << blockSize << "x" << blockSize << "..." << std::endl;
+    std::cout << "Pixelizing image with block size " << blockSize << "x" << blockSize << " using " 
+              << (numThreads == 0 ? "auto-detected" : std::to_string(numThreads)) 
+              << " threads..." << std::endl;
 
-    auto start = std::chrono::high_resolution_clock::now();
-    auto pixelized = pixelizeImage(image, width, height, blockSize);
-    auto end = std::chrono::high_resolution_clock::now();
+    auto start = std::chrono::steady_clock::now();
+    auto pixelized = pixelizeImageParallel(image, width, height, blockSize, numThreads);
+    auto end = std::chrono::steady_clock::now();
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    std::cout << "Pixelization completed in " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "Pixelization completed in " << duration.count() << " ns" << std::endl;
 
     if (saveImage(outputPath, pixelized, width, height)) {
         std::cout << "Image successfully saved!" << std::endl;
