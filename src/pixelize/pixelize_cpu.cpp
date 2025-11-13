@@ -1,10 +1,22 @@
 #include <iostream>
 #include <filesystem>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <atomic>
 
-#include "../../utils/image_utils.h"
+#include "../utils/image_utils.h"
 
-void processPixelBlock(int startX, int startY, int blockSize, int width, int height, const std::vector<Pixel>& input, std::vector<Pixel>& result) {
+
+void processPixelBlock(
+    int startX, 
+    int startY, 
+    int blockSize, 
+    int width, 
+    int height, 
+    const std::vector<Pixel>& input, 
+    std::vector<Pixel>& result
+) {
     int endX = std::min(startX + blockSize, width);
     int endY = std::min(startY + blockSize, height);
     int actualBlockSize = (endX - startX) * (endY - startY);
@@ -36,14 +48,56 @@ void processPixelBlock(int startX, int startY, int blockSize, int width, int hei
     }
 }
 
-std::vector<Pixel> pixelizeImage(const std::vector<Pixel>& input, int width, int height, int blockSize) {
+void processPixelBlocksRange(
+    int startY,
+    int endY,
+    int blockSize,
+    int width,
+    int height,
+    const std::vector<Pixel>& input,
+    std::vector<Pixel>& result
+) {
+    for (int y = startY; y < endY; y += blockSize) {
+        for (int x = 0; x < width; x += blockSize) {
+            processPixelBlock(x, y, blockSize, width, height, input, result);
+        }
+    }
+}
+
+std::vector<Pixel> pixelizeImageParallel(const std::vector<Pixel>& input, int width, int height, int blockSize) {
     if (blockSize <= 1) return input;
     
     std::vector<Pixel> result(input.size());
+    std::vector<std::thread> threads;
     
-    for (int y = 0; y < height; y += blockSize) {
-        for (int x = 0; x < width; x += blockSize) {
-            processPixelBlock(x, y, blockSize, width, height, input, result);
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    if (numThreads == 0) numThreads = 4;
+    
+    int rowsPerThread = (height + numThreads - 1) / numThreads;
+    
+    rowsPerThread = ((rowsPerThread + blockSize - 1) / blockSize) * blockSize;
+    
+    for (int i = 0; i < numThreads; ++i) {
+        int startY = i * rowsPerThread;
+        int endY = std::min((i + 1) * rowsPerThread, height);
+        
+        if (startY >= height) break;
+        
+        threads.emplace_back(
+            processPixelBlocksRange, 
+            startY, 
+            endY, 
+            blockSize, 
+            width, 
+            height, 
+            std::cref(input), 
+            std::ref(result)
+        );
+    }
+    
+    for (auto& thread : threads) {
+        if (thread.joinable()) {
+            thread.join();
         }
     }
     
@@ -65,7 +119,6 @@ int main() {
     std::cout << "Enter output image path: ";
     std::getline(std::cin, outputPath);
 
-    // Create output directories if it doesn't exist
     std::filesystem::path outputDir = std::filesystem::path(outputPath).parent_path();
     if (!outputDir.empty() && !std::filesystem::exists(outputDir)) {
         std::filesystem::create_directories(outputDir);
@@ -90,11 +143,11 @@ int main() {
     }
     
     std::cout << "Image loaded: " << width << "x" << height << std::endl;
-    std::cout << "Pixelizing image with block size " << blockSize << "x" << blockSize << "..." << std::endl;
+    std::cout << "Pixelizing image with block size " << blockSize << "x" << blockSize << std::endl;
 
-    auto start = std::chrono::steady_clock::now();
-    auto pixelized = pixelizeImage(image, width, height, blockSize);
-    auto end = std::chrono::steady_clock::now();
+    auto start = std::chrono::high_resolution_clock::now();
+    auto pixelized = pixelizeImageParallel(image, width, height, blockSize);
+    auto end = std::chrono::high_resolution_clock::now();
 
     auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     std::cout << "Pixelization completed in " << duration.count() << " ns" << std::endl;

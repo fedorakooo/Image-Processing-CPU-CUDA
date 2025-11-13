@@ -2,7 +2,7 @@
 #include <filesystem>
 #include <vector>
 #include <chrono>
-#include "../../utils/image_utils.h"
+#include "../utils/image_utils.h"
 
 __global__ void pixelizeKernel(Pixel* input, Pixel* output, int width, int height, int blockSize) {
     int blockX = blockIdx.x * blockDim.x + threadIdx.x;
@@ -110,14 +110,14 @@ int main() {
     }
 
     std::cout << "Image loaded: " << width << "x" << height << std::endl;
-    std::cout << "Pixelizing image with block size " << blockSize << "x" << blockSize << " on GPU..." << std::endl;
+    std::cout << "Pixelizing image with block size " << blockSize << "x" << blockSize << " on GPU" << std::endl;
 
     auto start = std::chrono::high_resolution_clock::now();
     auto pixelized = pixelizeImageCUDA(image, width, height, blockSize);
     auto end = std::chrono::high_resolution_clock::now();
 
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    std::cout << "Pixelization completed in " << duration.count() << " ms" << std::endl;
+    auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+    std::cout << "Pixelization completed in " << duration.count() << " ns" << std::endl;
 
     if (saveImage(outputPath, pixelized, width, height)) {
         std::cout << "Image successfully saved!" << std::endl;
