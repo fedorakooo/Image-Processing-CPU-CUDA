@@ -10,13 +10,14 @@
 
 void processPixelBlock(
     int startX, 
-    int startY, 
+    int startY,
     int blockSize, 
     int width, 
     int height, 
     const std::vector<Pixel>& input, 
     std::vector<Pixel>& result
-) {
+) 
+{
     int endX = std::min(startX + blockSize, width);
     int endY = std::min(startY + blockSize, height);
     int actualBlockSize = (endX - startX) * (endY - startY);

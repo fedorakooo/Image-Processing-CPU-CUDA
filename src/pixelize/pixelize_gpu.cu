@@ -121,7 +121,8 @@ int main() {
 
     if (saveImage(outputPath, pixelized, width, height)) {
         std::cout << "Image successfully saved!" << std::endl;
-    } else {
+    } 
+    else {
         std::cerr << "Error saving image" << std::endl;
         return 1;
     }
